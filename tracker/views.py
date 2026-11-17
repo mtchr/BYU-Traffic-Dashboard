@@ -12,6 +12,8 @@ from .geofence import get_lot
 from . import lot_polygons
 from django.contrib.auth.decorators import login_required
 
+from .geofence import get_lot
+
 @csrf_exempt
 def update_location(request):
     if request.method == 'POST':
@@ -300,21 +302,16 @@ def ingest_gps(request):
             lng = data.get('longitude')
             
             # 1. Update the vehicle's current live position
-            # get_or_create ensures that if a new Pi comes online, it builds a profile automatically
             vehicle, created = Vehicle.objects.get_or_create(
                 vehicle_id=vehicle_id,
                 defaults={'last_lat': lat, 'last_lon': lng}
             )
             
-            if not created:
-                vehicle.last_lat = lat
-                vehicle.last_lon = lng
-                
-                # Note: When you are ready, you will insert your Shapely geofencing 
-                # function right here to check if these new coords intersect a lot, 
-                # and update vehicle.current_lot before saving!
-                
-                vehicle.save()
+            # Update coordinates and execute the Shapely geofencing check
+            vehicle.last_lat = lat
+            vehicle.last_lon = lng
+            vehicle.lot = get_lot(lat, lng)
+            vehicle.save()
             
             # 2. Save the historical breadcrumb for the replay map
             # We use vehicle=vehicle here because VehicleLog expects the actual ForeignKey object
