@@ -1,0 +1,423 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PatrolCenter Dashboard</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}"> 
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        function updateShift() {
+            const now = new Date();
+            const hour = now.getHours();
+            const minutes = now.getMinutes();
+            const timeInMinutes = hour * 60 + minutes;
+            
+            // Format current time in military time (HH:MM)
+            const militaryTime = String(hour).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+            
+            // Define shift times in minutes from midnight
+            const morningStart = 6 * 60;      // 6:00 AM
+            const morningEnd = 10 * 60 + 15;  // 10:15 AM
+            const afternoonStart = 10 * 60 + 15; // 10:15 AM
+            const afternoonEnd = 14 * 60 + 15;   // 2:15 PM
+            const eveningStart = 14 * 60 + 15;   // 2:15 PM
+            const eveningEnd = 18 * 60 + 30;     // 6:30 PM
+            
+            let shift = "";
+            
+            if (timeInMinutes >= morningStart && timeInMinutes < morningEnd) {
+                shift = "Morning";
+            } else if (timeInMinutes >= afternoonStart && timeInMinutes < afternoonEnd) {
+                shift = "Afternoon";
+            } else if (timeInMinutes >= eveningStart && timeInMinutes < eveningEnd) {
+                shift = "Evening";
+            } else {
+                shift = "Overnight";
+            }
+            
+            document.getElementById('shift-display').textContent = `${militaryTime} | Shift: ${shift}`;
+        }
+        
+        // Update shift on page load
+        updateShift();
+        
+        // Update shift every minute
+        setInterval(updateShift, 60000);
+    });
+</script>
+
+<header>
+    <img src="{% static 'Monogram/PNG/BYU_logo_w.png' %}" class="logo">
+    <div class="header-title">Security & Traffic : Vehicle Tracking</div>   
+    <div id="shift-display">00:00 | Shift: Overnight</div>
+</header>
+
+<div class="dashboard-container">
+    
+    <div class="map-frame">
+        <div id="map" style="width: 100%; height: 100%;"></div>
+    </div>
+    
+    <div class="status-panel">
+        <h3>Traffic Lot Status</h3>
+        
+        <div id="lot-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; overflow-y: auto; flex-grow: 1; padding-right: 5px; align-content: start;">
+            </div>
+    </div>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    // --- 1. DEFINE THE TWO CAMERA ZONES ---
+    const coreSouthWest = L.latLng(40.24283044651075, -111.65881633758546); 
+    const coreNorthEast = L.latLng(40.25684935216534, -111.6429376602173);
+    const coreBounds = L.latLngBounds(coreSouthWest, coreNorthEast);
+
+    const extendedSouthWest = L.latLng(40.24286492553635, -111.65999614715578);
+    const extendedNorthEast = L.latLng(40.26614996986145, -111.64861615753174);
+    const extendedBounds = L.latLngBounds(extendedSouthWest, extendedNorthEast);
+
+    // --- 1.1 INITIALIZE MAP ---
+    const map = L.map('map', {
+        zoomControl: false,       
+        dragging: false,          
+        scrollWheelZoom: false,   
+        doubleClickZoom: false,   
+        boxZoom: false,           
+        keyboard: false,          
+        touchZoom: false,
+        zoomSnap: 0
+    });
+    window.map = map; 
+    
+    setTimeout(function() {
+        map.invalidateSize();
+        map.fitBounds(coreBounds, { padding: [0, 0] });
+    }, 100);
+    
+    map.fitBounds(coreBounds);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(map);
+
+    // --- 2. THE NEW HEADS-UP DISPLAY (LEGEND) ---
+    const legend = L.control({position: 'topleft'});
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend');
+        div.id = 'vehicle-legend';
+        div.style.backgroundColor = '#ffffff';
+        div.style.padding = '15px';
+        div.style.borderRadius = '8px';
+        div.style.boxShadow = '0 4px 10px rgba(0,0,0,0.1)';
+        div.style.borderTop = '4px solid #002e5d';
+        div.style.minWidth = '220px';
+        div.style.fontFamily = "'Segoe UI', sans-serif";
+        div.innerHTML = '<h4 style="margin-top:0; margin-bottom:10px; color:#002e5d;">Patrol Units</h4><div id="legend-content">Awaiting Data...</div>';
+        return div;
+    };
+    legend.addTo(map);
+
+    // --- 3. POLYGON STYLES & DYNAMIC CONFIG FETCH ---
+    const drawnPolygons = {};
+
+    const baseLotStyle = { color: "#6c757d", fillColor: "#adb5bd", fillOpacity: 0.3, weight: 1 };
+    const activeLotStyle = { color: "#002e5d", fillColor: "#ffc107", fillOpacity: 0.6, weight: 2 };
+    const completedLotStyle = { color: "#28a745", fillColor: "#28a745", fillOpacity: 0.4, weight: 2 };
+
+    let VERIFICATION_TIME = 15;
+    let completionThresholds = { "default": 30 };
+
+    fetch('/api/polygons/')
+        .then(response => response.json())
+        .then(data => {
+            VERIFICATION_TIME = data.verification_time || 15;
+            completionThresholds = data.thresholds || { "default": 30 };
+            const polygons = data.polygons ? data.polygons : data;
+
+            for (const [lotName, coords] of Object.entries(polygons)) {
+                
+                let currentStyle = {
+                    color: "#6c757d", 
+                    fillColor: "#adb5bd", 
+                    fillOpacity: 0.3,
+                    weight: 1
+                };
+                
+                if (lotName === "Lot B67") {
+                    const lats = coords.map(c => c[0]);
+                    const lngs = coords.map(c => c[1]);
+                    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+                    const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+                    
+                    const warehouseIcon = L.icon({
+                        iconUrl: '/static/warehouse.png', 
+                        iconSize: [40, 30], 
+                        iconAnchor: [10, 15] 
+                    });
+                    
+                    L.marker([centerLat, centerLng], {icon: warehouseIcon, interactive: false}).addTo(map);
+                    
+                    currentStyle.fillOpacity = 0.0; 
+                    currentStyle.color = "transparent";
+                    currentStyle.weight = 0;
+                } 
+
+                const poly = L.polygon(coords, currentStyle).addTo(map);
+                poly.bindTooltip(lotName, { permanent: false, direction: 'center' }); 
+                drawnPolygons[lotName] = poly;
+            }
+            // Trigger an initial sidebar draw once polygons load
+            updateSidebar();
+        }).catch(error => console.error("Error loading polygons:", error));
+
+    // --- 4. STATE MANAGEMENT & VEHICLE POLLING ---
+    const vehicleMarkers = {};
+    const vehicleState = {}; 
+    const lotState = {};     
+    let currentlyOccupiedLots = new Set(); // FIXED: Moved to global scope so Sidebar can see it!
+    let currentCameraState = 'core'; 
+
+    function updateMap() {
+        fetch('/api/vehicles/')
+            .then(response => response.json())
+            .then(data => {
+                currentlyOccupiedLots.clear(); // Reset the set on every fresh poll
+                let needsExtendedCamera = false; 
+
+                data.forEach(vehicle => {
+                    const lat = vehicle.latitude;
+                    const lon = vehicle.longitude;
+                    const v_id = vehicle.vehicle_id;
+                    const current_lot = vehicle.lot;
+
+                    if (lat === null || lon === null) return; 
+
+                    if (!vehicleState[v_id]) {
+                        vehicleState[v_id] = { currentLot: null, lastLot: null, entryTime: null, frozenTime: null };
+                    }
+                    const state = vehicleState[v_id];
+
+                    if (vehicleMarkers[v_id]) {
+                        vehicleMarkers[v_id].setLatLng([lat, lon]);
+                    } else {
+                        vehicleMarkers[v_id] = L.circleMarker([lat, lon], {
+                            radius: 8, fillColor: "#002e5d", color: "#ffffff", weight: 2, opacity: 1, fillOpacity: 0.8
+                        }).addTo(map);
+                    }
+
+                    if (current_lot) {
+                        currentlyOccupiedLots.add(current_lot);
+                        
+                        if (state.currentLot !== current_lot) {
+                            state.currentLot = current_lot;
+                            state.entryTime = vehicle.lot_entry_time ? new Date(vehicle.lot_entry_time) : new Date();
+                            state.frozenTime = null; 
+                        }
+                    } else {
+                        if (state.currentLot) {
+                            if (state.entryTime) {
+                                const diffMs = new Date() - state.entryTime;
+                                const diffSecs = Math.floor(diffMs / 1000); 
+                                
+                                const requiredCompletion = completionThresholds[state.currentLot] || completionThresholds["default"];
+
+                                // FIXED: Cleaned up the duplicate brackets and logic here
+                                if (diffSecs >= requiredCompletion) {
+                                    const diffMins = Math.floor(diffSecs / 60);
+                                    const remSecs = diffSecs % 60;
+                                    state.frozenTime = String(diffMins).padStart(2, '0') + ':' + String(remSecs).padStart(2, '0');
+                                    
+                                    lotState[state.currentLot] = { status: 'completed', time: state.frozenTime }; 
+                                    state.lastLot = state.currentLot;         
+                                } else if (diffSecs >= VERIFICATION_TIME) {
+                                    console.log(`Incomplete patrol of ${state.currentLot} (${diffSecs}s / ${requiredCompletion}s).`);
+                                }
+                            }
+                            state.currentLot = null;
+                        }
+                    }
+
+                    const vehicleLocation = L.latLng(lat, lon);
+                    if (!coreBounds.contains(vehicleLocation)) needsExtendedCamera = true;
+                });
+
+                for (const [lotName, polygonObj] of Object.entries(drawnPolygons)) {
+                    if (currentlyOccupiedLots.has(lotName)) {
+                        polygonObj.setStyle(activeLotStyle);     
+                    } else if (lotState[lotName] && lotState[lotName].status === 'completed') {
+                        polygonObj.setStyle(completedLotStyle);  
+                    } else {
+                        polygonObj.setStyle(baseLotStyle);       
+                    }
+                }
+
+                if (needsExtendedCamera && currentCameraState === 'core') {
+                    map.fitBounds(extendedBounds, { padding: [0, 0], animate: true, duration: 1.5 }); 
+                    currentCameraState = 'extended';
+                } else if (!needsExtendedCamera && currentCameraState === 'extended') {
+                    map.fitBounds(coreBounds, { padding: [0, 0], animate: true, duration: 1.5 });
+                    currentCameraState = 'core';
+                }
+
+                // FIXED: Added parentheses to execute the function
+                updateSidebar(); 
+            })
+            .catch(error => console.error("Error fetching vehicle data:", error));
+    }
+
+    updateMap();
+    setInterval(updateMap, 5000);
+
+    // --- 5. THE LIVE LEGEND TICKING ENGINE ---
+    setInterval(function() {
+        const now = new Date();
+        let html = '';
+
+        Object.keys(vehicleState).forEach(v_id => {
+            const state = vehicleState[v_id];
+            let displayString = '';
+
+                    if (state.currentLot && state.entryTime) {
+                        // Optionally, you can use liveTime if you want to show time in lot
+                        displayString = `<span style="color:#d9534f; font-weight:bold; font-size: 1.1em;">Active: ${state.currentLot}</span>`;
+                    } else if (state.lastLot && state.frozenTime) {
+                        displayString = `<span style="color:#6c757d;">Last Verified: ${state.lastLot} <br><strong>Total Time: ${state.frozenTime}</strong></span>`;
+                    } else {
+                        displayString = `<span style="color:#6c757d;"><em>In Transit</em></span>`;
+                    }
+
+                    html += `
+                        <div style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                            <strong style="color:#002e5d; font-size: 1.1em;">${v_id}</strong><br>
+                            ${displayString}
+                        </div>`;
+                });
+
+        const legendContent = document.getElementById('legend-content');
+        if (legendContent && html !== '') {
+            legendContent.innerHTML = html;
+        }
+    }, 1000);
+
+// --- 6. DYNAMIC SIDEBAR LIST ---
+    const coreLots = new Set([
+        "Lot 1", "Lot 2", "Lot 3", "Lot 4", "Lot 5", "Lot 6", "Lot 7", "Lot 8", "Lot 9",
+        "Lot 10_11", "Lot 12", "Lot 13", "Lot 14", "Lot 15", "Lot 16W", "Lot 16N", "Lot 18",
+        "Lot 19", "Lot 20", "Lot 22", "Lot 23", "Lot 24", "Lot 26", "Lot 29", "Lot 30", "Lot 31",
+        "Lot 32", "Lot 33", "Lot 34", "Lot 36", "Lot 37", "Lot 38", "Lot 39", "Lot 40", "Lot 41",
+        "Lot 45", "Lot 46", "Lot 48", "Lot 49", "Lot 50", "Lot 52B", "Lot 53", "Lot 55",
+        "Lot 56", "Lot 57", "Lot 59"
+    ]);
+
+    function updateSidebar() {
+        const gridBox = document.getElementById('lot-grid');
+        if (!gridBox || Object.keys(drawnPolygons).length === 0) return;
+
+        let lotsToDisplay = Object.keys(drawnPolygons);
+
+        // 1. Filter for Core View
+        if (currentCameraState === 'core') {
+            lotsToDisplay = lotsToDisplay.filter(lot => coreLots.has(lot));
+        }
+
+        // 2. FIXED SORTING: Grab ONLY the first continuous number so 10_11 becomes 10.
+        lotsToDisplay.sort((a, b) => {
+            const numA = parseInt((a.match(/\d+/) || ['999'])[0]);
+            const numB = parseInt((b.match(/\d+/) || ['999'])[0]);
+            if (numA !== numB) return numA - numB;
+            return a.localeCompare(b); 
+        });
+
+        // 3. Split the sorted lots into two groups
+        const activeOrCompletedLots = [];
+        const pendingLots = [];
+
+        lotsToDisplay.forEach(lot => {
+            if (currentlyOccupiedLots.has(lot) || (lotState[lot] && lotState[lot].status === 'completed')) {
+                activeOrCompletedLots.push(lot);
+            } else {
+                pendingLots.push(lot);
+            }
+        });
+
+        let html = '';
+
+        // 4. Helper function to generate a bubble
+        const buildBubble = (lotName) => {
+            // Strip "Lot " and replace underscores with slashes for the UI
+            const shortName = lotName.replace('Lot ', '').replace('_', ' / '); 
+            
+            let bgColor = '#f8f9fa'; 
+            let textColor = '#6c757d';
+            let borderColor = '#dee2e6';
+            let timeText = '--:--';
+
+            if (currentlyOccupiedLots.has(lotName)) {
+                bgColor = '#ffc107'; 
+                textColor = '#000000';
+                borderColor = '#d39e00';
+                timeText = 'Active';
+            } else if (lotState[lotName] && lotState[lotName].status === 'completed') {
+                bgColor = '#28a745'; 
+                textColor = '#ffffff';
+                borderColor = '#1e7e34';
+                timeText = lotState[lotName].time; 
+            }
+
+            return `
+                <div style="
+                    background-color: ${bgColor}; 
+                    color: ${textColor}; 
+                    border: 1px solid ${borderColor};
+                    border-radius: 6px; 
+                    padding: 4px 2px; 
+                    text-align: center; 
+                    display: flex; 
+                    flex-direction: column; 
+                    justify-content: center;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                ">
+                    <strong style="font-size: 0.85em; margin-bottom: 0px; line-height: 1.1;">${shortName}</strong>
+                    <span style="font-size: 0.7em; font-weight: 500; opacity: 0.9; line-height: 1.1;">${timeText}</span>
+                </div>`;
+        };
+
+        // 5. Render Active/Completed Lots First (or a placeholder)
+        if (activeOrCompletedLots.length === 0) {
+            // Inject an invisible placeholder bubble to reserve exactly one row of space above the line
+            html += `
+                <div style="visibility: hidden; padding: 4px 2px; display: flex; flex-direction: column; justify-content: center;">
+                    <strong style="font-size: 0.85em; margin-bottom: 0px; line-height: 1.1;">Empty</strong>
+                    <span style="font-size: 0.7em; line-height: 1.1;">--:--</span>
+                </div>`;
+        } else {
+            activeOrCompletedLots.forEach(lot => html += buildBubble(lot));
+        }
+
+        // 6. ALWAYS Add the Separator Line
+        html += `
+            <div style="grid-column: 1 / -1; display: flex; justify-content: center; margin: 8px 0;">
+                <div style="width: 70%; height: 2px; background-color: #e9ecef; border-radius: 2px;"></div>
+            </div>`;
+
+        // 7. Render Pending Lots Below
+        pendingLots.forEach(lot => html += buildBubble(lot));
+
+        gridBox.innerHTML = html;
+    }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1375 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<!-- Matthew Christensen 250 -->
+<head>
+    <title>PatrolCenter Dashboard 
+    </title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=5">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* --- Map Search & Camera Controls --- */
+    .map-overlay-controls {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        z-index: 1000; /* Keeps it above the Leaflet map */
+        display: flex;
+        gap: 10px;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    
+    
+    </style>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<svg style="width:0; height:0; position:absolute;" aria-hidden="true">
+    <defs>
+        <pattern id="red-stripes" width="20" height="20" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <rect width="20" height="20" fill="#f5c2c7" />
+            <rect width="10" height="20" fill="#dc3545" />
+        </pattern>
+    </defs>
+</svg>
+
+<script>
+    
+    // BYU Traffic & Security Patrol Dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+        function updateShift() {
+            const now = new Date();
+            const hour = now.getHours();
+            const minutes = now.getMinutes();
+            const timeInMinutes = hour * 60 + minutes;
+            const dayOfWeek = now.getDay(); // Sunday is 0
+            
+            // Format current time in military time (HH:MM)
+            const militaryTime = String(hour).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+            
+            let shift = "Off-Shift";
+            
+            if (dayOfWeek === 0) {
+                // SUNDAY SCHEDULE
+                if (timeInMinutes >= 8 * 60 && timeInMinutes < 11 * 60) {
+                    shift = "Morning";
+                } else if (timeInMinutes >= 11 * 60 && timeInMinutes < 14 * 60) {
+                    shift = "Afternoon";
+                }
+            } else {
+                // MONDAY - SATURDAY SCHEDULE
+                if (timeInMinutes >= 1 * 60 && timeInMinutes < 5 * 60) {
+                    shift = "Overnight";
+                } else if (timeInMinutes >= 6 * 60 + 45 && timeInMinutes < 10 * 60 + 15) {
+                    shift = "Morning";
+                } else if (timeInMinutes >= 10 * 60 + 15 && timeInMinutes < 13 * 60 + 15) {
+                    shift = "Afternoon";
+                } else if (timeInMinutes >= 13 * 60 + 15 && timeInMinutes < 17 * 60) {
+                    shift = "Evening";
+                }
+            }
+            
+            document.getElementById('shift-display').textContent = `${militaryTime} | Shift: ${shift}`;
+        }
+        
+        updateShift();
+        setInterval(updateShift, 60000); // Poll every 60 seconds
+    });
+</script>
+
+<header>
+    <img src="{% static 'Monogram/PNG/BYU_logo_w.png' %}" class="logo">
+    <div class="header-title">Security & Traffic : Vehicle Dashboard</div>   
+    <div id="shift-display">00:00 | Shift: Overnight</div>
+</header>
+
+<div class="dashboard-container">
+    
+   <div class="map-frame" style="position: relative;">
+        <div id="map" style="width: 100%; height: 100%;"></div>
+        
+        <!-- Map Overlay Controls -->
+        <div class="map-overlay-controls">
+            <!-- Search Bar -->
+            <div class="search-container">
+                <input type="text" id="lot-search-input" class="lot-search-input" placeholder="Find Lot...">
+                <button id="lot-search-btn" class="lot-search-btn" title="Search">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </button>
+                <div id="lot-search-dropdown" class="search-dropdown"></div>
+            </div>
+
+            <!-- Camera Controls -->
+            <div class="camera-btn-group">
+                <button id="cam-zoom-in-btn" class="cam-btn" title="Zoom In">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button id="cam-zoom-out-btn" class="cam-btn" title="Zoom Out">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button id="cam-auto-btn" class="cam-btn" title="Auto Campus Focus">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0-9 9 9 9 0 0 0 9 9 9 9 0 0 0 9-9 9 9 0 0 0-9-9z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+                <button id="cam-extended-btn" class="cam-btn" title="Whole Lot View (Extended)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="status-panel" style="display: flex; flex-direction: column; height: 100%;">
+        
+        <h3 class="panel-header">Traffic Lot Status</h3>
+        <div id="lot-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; overflow-y: auto; flex-grow: 1; padding-right: 5px; align-content: start;"></div>
+
+        <div class="layoff-panel" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #dee2e6;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 class="panel-header" style="margin: 0;">Lay-offs</h3> <!-- Grey color stripped out! -->
+                <button id="openLayoffsBtn" type="button" style="background-color: #002e5d; color: #ffffff; border: none; border-radius: 4px; padding: 3px 8px; font-size: 0.75em; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px;">Update</button>
+            </div>
+            <div id="layoff-container" style="background: #f8f9fa; border: 1px dashed #ced4da; border-radius: 8px; padding: 10px; min-height: 45px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                <div class="empty-state-text">Awaiting lay-off data...</div>
+            </div>
+        </div>
+
+        <div class="vehicle-summary-panel" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #dee2e6;">
+            <h3 class="panel-header">Vehicle Patrol-Time</h3>
+            <div id="roster-container" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 10px;">
+                <div class="empty-state-text" style="grid-column: 1 / -1;">Awaiting shift data...</div>
+            </div>
+        </div>
+
+    </div> 
+</div> 
+
+<!-- Modal 1: Lot Selector Popup -->
+<div id="layoffModal" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); z-index: 9999; align-items: center; justify-content: center;">
+  <div id="layoffModalCard" style="background: #ffffff; width: 460px; max-width: 92vw; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); overflow: hidden; display: flex; flex-direction: column;">
+    
+    <div style="padding: 12px 18px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+      <h4 id="layoffModalHeader" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #1e293b;">All Lots</h4>
+      <span id="closeLayoffModal" style="cursor: pointer; font-size: 1.4rem; font-weight: bold; color: #94a3b8; line-height: 1;">&times;</span>
+    </div>
+
+    <div id="pillGrid" style="padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 10px; max-height: 320px; overflow-y: auto;">
+      <!-- Lot pills render here -->
+    </div>
+
+    <div style="padding: 10px 18px; gap: 5px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end;">
+        <button id="clearAllLayoffsBtn" type="button" style="background: transparent; color: #dc2626; border: 1px solid #f87171; padding: 5px 12px; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 0.8rem; transition: background 0.15s ease;">Clear All</button>
+        <button id="saveLayoffsDoneBtn" type="button" style="background: #002e5d; color: white; border: none; padding: 6px 20px; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 0.85rem;">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal 2: Time Settings Popup -->
+<div id="timeModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 10000; align-items: center; justify-content: center;">
+  <div id="timeModalCard" style="background: #ffffff; width: 290px; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.3); padding: 18px;">
+    <h4 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 700; color: #1e293b;">Time</h4>
+
+    <label style="display: flex; align-items: center; gap: 8px; font-size: 0.88rem; font-weight: 600; color: #334155; margin-bottom: 12px; cursor: pointer;">
+      <input type="checkbox" id="allDayCheckbox" checked style="cursor: pointer;">
+      All Day
+    </label>
+
+    <!-- Custom time dropdown container -->
+    <div id="customTimeInputs" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 14px;">
+      <div>
+        <label style="font-size: 0.75rem; font-weight: 600; color: #64748b;">Start Time</label>
+        <select id="startTimeSelect" style="width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: #fff;"></select>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; font-weight: 600; color: #64748b;">End Time</label>
+        <select id="endTimeSelect" style="width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85rem; background: #fff;"></select>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button id="cancelTimeBtn" type="button" style="background: #f1f5f9; color: #475569; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.82rem;">Cancel</button>
+      <button id="confirmTimeBtn" type="button" style="background: #002e5d; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.82rem;">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    // --- 1. DEFINE CAMERA ZONES & INIT MAP ---
+    const coreSouthWest = L.latLng(40.24283044651075, -111.65881633758546); 
+    const coreNorthEast = L.latLng(40.25684935216534, -111.6429376602173);
+    const coreBounds = L.latLngBounds(coreSouthWest, coreNorthEast);
+
+    const extendedSouthWest = L.latLng(40.24286492553635, -111.65999614715578);
+    const extendedNorthEast = L.latLng(40.26614996986145, -111.64861615753174);
+    const extendedBounds = L.latLngBounds(extendedSouthWest, extendedNorthEast);
+
+    const map = L.map('map', {
+        zoomControl: false,       
+        dragging: true,          
+        scrollWheelZoom: false,   
+        doubleClickZoom: false,   
+        boxZoom: false,           
+        keyboard: false,          
+        touchZoom: false,
+        zoomSnap: 0
+    });
+    window.map = map; 
+
+    // --- Define Custom Vehicle Icons ---
+    const vehicleOneIcon = L.icon({
+        iconUrl: '{% static "tracker/images/grey_tundra.png" %}', 
+        iconSize: [45, 45],        
+        iconAnchor: [20, 20],      
+        popupAnchor: [0, -20],
+        className: 'byu-vehicle-glow' 
+    });
+
+    const vehicleTwoIcon = L.icon({
+        iconUrl: '{% static "tracker/images/tan_tacoma.png" %}',
+        iconSize: [45, 45],
+        iconAnchor: [20, 20],
+        popupAnchor: [0, -20],
+        className: 'byu-vehicle-glow' 
+    });
+
+    const vehicleThreeIcon = L.icon({
+        iconUrl: '{% static "tracker/images/rav4.png" %}',
+        iconSize: [45, 38],
+        iconAnchor: [20, 20],
+        popupAnchor: [0, -20],
+        className: 'byu-vehicle-glow' 
+    });
+
+    // A fallback just in case a new vehicle gets added without an image yet
+    const defaultIcon = new L.Icon.Default();
+        
+        // Create a custom high-level pane so vehicle dots never hide behind overlays
+        map.createPane('vehiclePane');
+        map.getPane('vehiclePane').style.zIndex = 650; 
+        map.getPane('vehiclePane').style.pointerEvents = 'none'; // Prevents the pane from blocking map drag/clicks
+    
+    setTimeout(function() {
+        map.invalidateSize();
+        map.fitBounds(coreBounds, { padding: [0, 0] });
+    }, 100);
+    map.fitBounds(coreBounds);
+
+    L.tileLayer('https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_3ic3_1_ee8432135a6156b139c9224d', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(map);
+
+    // --- 2. THE HEADS-UP DISPLAY (LEGEND) ---
+    const legend = L.control({position: 'topleft'});
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend');
+        div.id = 'vehicle-legend';
+        div.style.backgroundColor = '#ffffff';
+        div.style.padding = '15px';
+        div.style.borderRadius = '8px';
+        div.style.boxShadow = '0 4px 10px rgba(0,0,0,0.1)';
+        div.style.borderTop = '4px solid #002e5d';
+        div.style.minWidth = '220px';
+        div.style.fontFamily = "'Segoe UI', sans-serif";
+        div.innerHTML = '<h3 class="panel-header" style="margin-top:0; margin-bottom:10px;">Patrol Units</h3><div id="legend-content"><div class="empty-state-text" style="text-align: left;">Awaiting Data...</div></div>';        return div;
+    };
+    legend.addTo(map);
+
+    // --- 2.5 THE FOOD STOP TRACKER (BOTTOM LEFT) ---
+    const pitStopControl = L.control({position: 'bottomleft'});
+    pitStopControl.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend');
+        div.style.backgroundColor = 'rgba(255, 255, 255, 0.9)'; 
+        div.style.padding = '10px 15px';
+        div.style.borderRadius = '8px';
+        div.style.boxShadow = '0 4px 10px rgba(0,0,0,0.1)';
+        div.style.borderTop = '4px solid #002e5d'; // UPDATED: Changed from #dc3545 to match the dark blue UI
+        div.style.fontFamily = "'Segoe UI', sans-serif";
+
+        // Flexbox row containing the three logos clustered together, and a single grand-total counter
+        div.innerHTML = `
+            <div class="panel-header" style="font-size: 0.85em; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">Food Stops</div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <img src="/static/Mc.png" style="height: 24px; width: auto; object-fit: contain;">
+                    <img src="/static/chicken.png" style="height: 24px; width: auto; object-fit: contain;">
+                    <img src="/static/chicken2.png" style="height: 24px; width: auto; object-fit: contain;">
+                </div>
+                <div style="border-left: 2px solid #dee2e6; padding-left: 12px;">
+                    <span id="tally-FoodStop" style="font-size: 1.3em; font-weight: bold; color: var(--dark-blue);">0</span>
+                </div>
+            </div>
+        `;
+        return div;
+    };
+    pitStopControl.addTo(map);
+
+
+    // --- 3. POLYGON STYLES & FETCH ---
+    const drawnPolygons = {};
+    
+    const activeLotStyle = { color: "#198754", fillColor: "#28a745", fillOpacity: 0.6, weight: 2 };
+    const partialLotStyle = { color: "#d39e00", fillColor: "#ffc107", fillOpacity: 0.6, weight: 2 };
+    const completedLotStyle = { color: "#001a35", fillColor: "#002e5d", fillOpacity: 0.5, weight: 2 };
+    const previousShiftLotStyle = { color: "#6ea8fe", fillColor: "#9ec5fe", fillOpacity: 0.25, weight: 1.5, dashArray: "4, 4" };
+
+    const layoffLotStyle = { 
+        color: "#dc3545", // Softer red border
+        fillColor: "url(#red-stripes)",
+        fillOpacity: 0.6, // Restored translucency so the map shows through!
+        weight: 2 
+    };
+
+    const baseLotStyle = { color: "#6c757d", fillColor: "#adb5bd", fillOpacity: 0.3, weight: 1 };
+  
+    let VERIFICATION_TIME = 15;
+
+    fetch('/api/polygons/')
+        .then(response => response.json())
+        .then(data => {
+            VERIFICATION_TIME = data.verification_time || 15;
+            const polygons = data.polygons ? data.polygons : data;
+
+            // Define your exact restaurant names, paths, AND custom dimensions [width, height]
+            const restaurantLogos = {
+                "CFA": { src: "/static/chicken.png", size: [35, 35], offset: [0.00025, 0.0002] }, // Nudged slightly UP and RIGHT },
+                "MCD": { src: "/static/Mc.png", size: [60, 35], offset: [-0.0001, -0.0004] }, // Nudged DOWN and LEFT },    
+                "CANES": { src: "/static/chicken2.png", size: [50, 30], offset: [0.00025, 0.0000] }  // Nudlged slightly UP } 
+            };
+
+            for (const [lotName, coords] of Object.entries(polygons)) {
+                let currentStyle = { color: "#6c757d", fillColor: "#adb5bd", fillOpacity: 0.3, weight: 1 };
+                
+                const lats = coords.map(c => c[0]);
+                const lngs = coords.map(c => c[1]);
+                const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+                const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+
+                if (lotName === "Lot B67") {
+                    const warehouseIcon = L.icon({ iconUrl: '/static/warehouse.png', iconSize: [40, 30], iconAnchor: [20, 15] });
+                    L.marker([centerLat, centerLng], {icon: warehouseIcon, interactive: false}).addTo(map);
+                    
+                    currentStyle.fillOpacity = 0.0; 
+                    currentStyle.color = "transparent";
+                    currentStyle.weight = 0;
+                } 
+                // --- NEW LOGO DRAWING LOGIC ---
+                else if (restaurantLogos[lotName]) {
+                    const logoData = restaurantLogos[lotName];
+                    
+                    // 1. Grab your custom offset (or default to 0 if you leave it blank)
+                    const latOffset = logoData.offset ? logoData.offset[0] : 0;
+                    const lngOffset = logoData.offset ? logoData.offset[1] : 0;
+                    
+                    // 2. Add the offset to the mathematical center
+                    const finalLat = centerLat + latOffset;
+                    const finalLng = centerLng + lngOffset;
+
+                    const foodIcon = L.icon({ 
+                        iconUrl: logoData.src, 
+                        iconSize: logoData.size, 
+                        iconAnchor: [logoData.size[0] / 2, logoData.size[1] / 2] 
+                    });
+                    
+                    // 3. Drop the marker at the new final coordinates instead of the center!
+                    L.marker([finalLat, finalLng], {icon: foodIcon, interactive: false, pane: 'vehiclePane'}).addTo(map);
+                    
+                    currentStyle.fillOpacity = 0.0; 
+                    currentStyle.color = "transparent";
+                    currentStyle.weight = 0;
+                }
+
+                // 2. Draw the polygon
+                const poly = L.polygon(coords, currentStyle).addTo(map);
+                
+                // 3. NEW: If it's a logo/warehouse, flag it so the dashboard doesn't paint it!
+                if (lotName === "Lot B67" || restaurantLogos[lotName]) {
+                    poly.isStaticIcon = true; 
+                } else {
+                    poly.bindTooltip(lotName, { permanent: false, direction: 'center' }); 
+                }
+                
+                drawnPolygons[lotName] = poly;
+            }
+            updateDashboard(); 
+        }).catch(error => console.error("Error loading polygons:", error));
+
+        
+
+
+    // --- 4. THE MASTER DASHBOARD ENGINE ---
+    const vehicleMarkers = {};
+    let currentlyOccupiedLots = new Set();
+    let lotState = {}; 
+    let latestVehicleData = []; 
+    let currentCameraState = 'core'; 
+    let authoritativeLotTimes = {}; 
+    let currentLayoffs = new Set(); // Global declaration, empty set initially
+
+    // --- CAMERA LOCK STATES ---
+    let cameraLockMode = 'auto'; // 'auto', 'manual', 'vehicle'
+    let trackedVehicleId = null;
+
+    // --- TIMESTAMP FORMATTER ---
+    function formatLastCompleted(isoString) {
+        if (!isoString) return '--:--';
+        const date = new Date(isoString);
+        const today = new Date();
+        const isToday = date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
+        
+        if (isToday) {
+            return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+        } else {
+            return String(date.getMonth() + 1).padStart(2, '0') + '/' + String(date.getDate()).padStart(2, '0');
+        }
+    }
+
+    // --- GLOBAL POPOVER CONTROLLER ---
+    window.showLotInfo = function(event, lotName, type) {
+        event.stopPropagation();
+        const popover = document.getElementById('global-lot-popover');
+        const entriesBox = document.getElementById('popover-entries');
+        const titleBox = document.getElementById('popover-title');
+
+        // Extract the exact data block
+        const fullLot = lotName.startsWith('Lot ') ? lotName : `Lot ${lotName}`;
+        let data = (type === 'previous') 
+            ? lotState.previous_shifts[fullLot] || lotState.previous_shifts[lotName]
+            : lotState.current_shift[fullLot] || lotState.current_shift[lotName];
+
+        if (!data || !data.entries || data.entries.length === 0) {
+            entriesBox.innerHTML = '<div style="font-size:0.75rem; color:#6c757d;">No history found.</div>';
+        } else {
+            entriesBox.innerHTML = data.entries.map((e, idx) => `
+                <div class="lot-popover-entry">
+                    <span>Entry ${idx + 1}:</span>
+                    <strong>${e.in} - ${e.out}</strong>
+                </div>
+            `).join('');
+        }
+
+        const shortName = lotName.replace(/^Lot\s+/i, '').replace('_', ' / ');
+        titleBox.textContent = `Lot ${shortName} History`;
+
+        // Anchor logic: Position popup relative to the clicked button
+        popover.style.display = 'block';
+        const btnRect = event.target.getBoundingClientRect();
+        
+        // Spawn to the left of the cursor so it doesn't spill off the right edge of the screen
+        let leftPos = btnRect.left - 170; 
+        if (leftPos < 10) leftPos = btnRect.right + 10; // Fallback to right if too tight
+        
+        popover.style.left = leftPos + 'px';
+        popover.style.top = btnRect.top + 'px';
+    };
+
+    // Global Click Dismissal
+    document.addEventListener('click', function(e) {
+        const popover = document.getElementById('global-lot-popover');
+        if (popover && !e.target.closest('.lot-popover') && !e.target.closest('.info-icon-btn')) {
+            popover.style.display = 'none';
+        }
+    });
+
+    function updateDashboard() {
+        // Read fresh localStorage every poll cycle and populate the global Set
+        currentLayoffs.clear();
+        try {
+            const initialSaved = JSON.parse(localStorage.getItem('savedLayoffs') || '{}');
+            Object.keys(initialSaved).forEach(k => {
+                currentLayoffs.add(`Lot ${k}`);
+                currentLayoffs.add(k);
+            });
+        } catch (e) {
+            console.error("Error reading savedLayoffs:", e);
+        }
+        Promise.all([
+            fetch('/api/vehicles/').then(res => res.json()),
+            fetch('/api/completed_patrols/').then(res => res.json()),
+            fetch('/api/vehicle_summary/').then(res => res.json())
+        ])
+        .then(([vehicleData, completedData, summaryData]) => {
+            currentlyOccupiedLots.clear();
+            let needsExtendedCamera = false;
+            
+            latestVehicleData = vehicleData;
+            lotState = completedData; /*commented for TESTING ONLY
+            // --- MOCK PROTOTYPE DATA ---
+            if (!completedData.current_shift) completedData.current_shift = {};
+            if (!completedData.previous_shifts) completedData.previous_shifts = {};
+            
+            const now = new Date();
+            const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+
+            // Mock multiple entries today
+            completedData.current_shift['Lot 20'] = { 
+                status: 'completed', 
+                last_completed: now.toISOString(),
+                entries: [{in: '14:02:15', out: '14:15:30'}, {in: '15:20:00', out: '15:21:18'}] 
+            };
+            // Mock a quick drive-through today
+            completedData.current_shift['Lot 45'] = { 
+                status: 'completed', 
+                last_completed: now.toISOString(),
+                entries: [{in: '09:00:10', out: '09:00:45'}]
+            };
+            // Mock a previous shift from yesterday
+            completedData.previous_shifts['Lot 18'] = {
+                status: 'completed',
+                last_completed: yesterday.toISOString(),
+                entries: [{in: '22:15:00', out: '22:30:45'}, {in: '23:10:15', out: '23:12:00'}]
+            };
+
+            lotState = completedData;
+            //TESTING ONLY*/
+
+            // NEW: Update the Food Stop tally directly from the backend
+            const foodTally = document.getElementById('tally-FoodStop');
+            if (foodTally) {
+                foodTally.innerText = completedData.food_stop_count || 0;
+            }
+
+            authoritativeLotTimes = {};
+
+            authoritativeLotTimes = {};
+            if (completedData.current_shift) {
+                Object.keys(completedData.current_shift).forEach(lot => {
+                    authoritativeLotTimes[lot] = completedData.current_shift[lot].total_seconds || 0;
+                });
+            }
+
+            const rosterContainer = document.getElementById('roster-container');
+            if (summaryData.length > 0) {
+                let rosterHtml = '';
+                const topVehicles = summaryData.slice(0, 3);
+                
+                topVehicles.forEach(stat => {
+                    rosterHtml += `
+                        <div style="display: flex; flex-direction: column; align-items: center;">
+                            <div style="
+                                width: 54px; height: 54px; border-radius: 50%;
+                                background: conic-gradient(#28a745 ${stat.patrol_pct}%, #ced4da ${stat.patrol_pct}% 100%);
+                                display: flex; align-items: center; justify-content: center; margin-bottom: 6px;
+                                box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+                            ">
+                                <div style="
+                                    width: 42px; height: 42px; background-color: #f8f9fa; border-radius: 50%;
+                                    display: flex; align-items: center; justify-content: center;
+                                    font-size: 0.75em; font-weight: bold; color: #002e5d;
+                                ">
+                                    ${Math.round(stat.patrol_pct)}%
+                                </div>
+                            </div>
+                            <div style="font-size: 0.85em; font-weight: bold; color: #002e5d; line-height: 1;">${stat.vehicle_id}</div>
+                            <div style="font-size: 0.65em; color: #6c757d; margin-top: 3px;">${stat.completed_lots} Cleared</div>
+                        </div>
+                    `;
+                });
+                rosterContainer.innerHTML = rosterHtml;
+            } else {
+                rosterContainer.innerHTML = '<em style="color: #6c757d; font-size: 0.85em; grid-column: 1 / -1; text-align: center;">Awaiting shift data...</em>';
+            }
+
+            // --- 2. Process Live Vehicles ---
+            vehicleData.forEach(vehicle => {
+                const lat = vehicle.latitude;
+                const lon = vehicle.longitude;
+                const v_id = vehicle.vehicle_id;
+                const current_lot = vehicle.lot;
+
+                if (lat === null || lon === null) return; 
+
+                // 1. Determine which icon to use based on the database name
+                let selectedIcon;
+                switch(v_id) {
+                    case "SE4":
+                        selectedIcon = vehicleOneIcon;
+                        break;
+                    case "SE5":
+                        selectedIcon = vehicleTwoIcon;
+                        break;
+                    case "SE6":
+                        selectedIcon = vehicleThreeIcon;
+                        break;
+                    default:
+                        selectedIcon = defaultIcon; // Fallback to the blue dot
+                }
+
+                // 2. Draw or update the custom image marker
+                if (vehicleMarkers[v_id]) {
+                    vehicleMarkers[v_id].setLatLng([lat, lon]);
+                    vehicleMarkers[v_id].setIcon(selectedIcon);
+                } else {
+                    vehicleMarkers[v_id] = L.marker([lat, lon], {
+                        icon: selectedIcon,
+                        pane: 'vehiclePane' 
+                    }).bindPopup(`<b>${v_id}</b>`).addTo(map);
+                }
+
+                const vehicleLocation = L.latLng(lat, lon);
+                if (!coreBounds.contains(vehicleLocation)) needsExtendedCamera = true;
+
+                if (current_lot) {
+                    currentlyOccupiedLots.add(current_lot);
+                }
+            });
+
+            // --- 3. Update Polygon Colors & Badges ---
+            for (const [lotName, polygonObj] of Object.entries(drawnPolygons)) {
+                if (polygonObj.isStaticIcon) continue; 
+
+                const fullLot = lotName.startsWith('Lot ') ? lotName : `Lot ${lotName}`;
+                
+                let shiftData = lotState.current_shift ? (lotState.current_shift[fullLot] || lotState.current_shift[lotName]) : null;
+                let isPastShift = false;
+                
+                if (!shiftData || shiftData.status === 'pending') {
+                    const pastData = lotState.previous_shifts ? (lotState.previous_shifts[fullLot] || lotState.previous_shifts[lotName]) : null;
+                    if (pastData && pastData.status === 'completed') {
+                        shiftData = pastData;
+                        isPastShift = true;
+                    }
+                }
+
+                if (currentLayoffs && currentLayoffs.has(lotName)) {
+                    polygonObj.setStyle(layoffLotStyle); 
+                } else if (currentlyOccupiedLots.has(lotName)) {
+                    polygonObj.setStyle(activeLotStyle);     
+                } else if (shiftData && shiftData.status === 'partial') {
+                    polygonObj.setStyle(partialLotStyle); 
+                } else if (shiftData && shiftData.daily_runs > 0) {
+                    
+                    // POLYGON BLUE TIERS
+                    const targets = { low: 1, medium: 2, high: 3 };
+                    const priority = shiftData.priority || 'low';
+                    const runs = shiftData.daily_runs;
+                    const target = targets[priority];
+                    
+                    let tier = 1;
+                    if (runs >= target) tier = 3;
+                    else if (target === 3 && runs === 2) tier = 2;
+                    
+                    let fill = "#adb5bd", border = "#6c757d", baseOpacity = 0.5;
+                    if (tier === 1) { fill = "#cfe2ff"; border = "#084298"; baseOpacity = 0.4; }
+                    else if (tier === 2) { fill = "#3d8bfd"; border = "#0d6efd"; baseOpacity = 0.5; }
+                    else if (tier === 3) { fill = "#002e5d"; border = "#001a35"; baseOpacity = 0.6; }
+
+                    polygonObj.setStyle({
+                        color: border,
+                        fillColor: fill,
+                        // Lower opacity slightly for past shifts to reduce visual weight
+                        fillOpacity: isPastShift ? (baseOpacity - 0.15) : baseOpacity,
+                        weight: 2,
+                        dashArray: isPastShift ? "6, 6" : null
+                    });
+                } else {
+                    polygonObj.setStyle(baseLotStyle);       
+                }
+            }
+
+            // --- CAMERA PANNING & LOCK LOGIC ---
+            if (cameraLockMode === 'auto') {
+                // Let the dashboard automatically jump between Core and Extended based on vehicle bounds
+                if (needsExtendedCamera && currentCameraState !== 'extended') {
+                    map.flyToBounds(extendedBounds, { padding: [0, 0], animate: true, duration: 1.5 }); 
+                    currentCameraState = 'extended';
+                } else if (!needsExtendedCamera && currentCameraState !== 'core') {
+                    map.flyToBounds(coreBounds, { padding: [0, 0], animate: true, duration: 1.5 });
+                    currentCameraState = 'core';
+                }
+            } else if (cameraLockMode === 'vehicle' && trackedVehicleId) {
+                // Smoothly glide to the vehicle's general area every 5 seconds
+                const vData = latestVehicleData.find(v => v.vehicle_id === trackedVehicleId);
+                if (vData && vData.latitude && vData.longitude) {
+                    // panTo gently slides the camera to the new coordinates without altering the user's zoom
+                    map.panTo([vData.latitude, vData.longitude], { animate: true, duration: 1.5 });
+                }
+            }
+
+            updateSidebar();
+            updateLiveTimers();
+        })
+        .catch(error => console.error("Error fetching map data:", error));
+    }
+
+    setInterval(updateDashboard, 5000);
+    
+    // --- 4.1 THE 1-SECOND LIVE TICKER ---
+    function updateLiveTimers() {
+        const now = new Date();
+        let legendHtml = '';
+
+        latestVehicleData.forEach(vehicle => {
+            const v_id = vehicle.vehicle_id;
+            const current_lot = vehicle.lot;
+
+            // Route the vehicle ID to the correct image path
+            let iconUrl = '';
+            let customStyle = '';
+            if (v_id === 'SE4') {
+                iconUrl = '{% static "tracker/images/grey_tundra.png" %}';
+                customStyle = 'transform: scale(1.5); transform-origin: center;'; 
+            } 
+            else if (v_id === 'SE5') {
+                iconUrl = '{% static "tracker/images/tan_tacoma.png" %}';
+                customStyle = 'transform: scale(1.5); transform-origin: center;';
+            } 
+            else if (v_id === 'SE6') {
+                iconUrl = '{% static "tracker/images/rav4.png" %}';
+                customStyle = 'transform: scale(1.1); transform-origin: center;'; 
+            }
+
+            // Build a flexbox header containing the image, the ID, and the Tracker Button
+            const vehicleHeaderHtml = `
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong style="color:#002e5d; font-size: 1.1em; line-height: 1;">${v_id}</strong>
+                    ${iconUrl ? `<img src="${iconUrl}" style="height: 22px; width: 40px; object-fit: contain; ${customStyle}">` : ''}
+                </div>
+                <button onclick="focusVehicle('${v_id}')" title="Track ${v_id}" style="
+                    background: ${trackedVehicleId === v_id ? '#002e5d' : 'transparent'}; 
+                    color: ${trackedVehicleId === v_id ? '#ffffff' : '#002e5d'}; 
+                    border: 1px solid ${trackedVehicleId === v_id ? '#002e5d' : '#ced4da'}; 
+                    border-radius: 4px; padding: 3px 6px; cursor: pointer; display: flex; align-items: center; transition: 0.2s;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+            </div>
+            `;
+
+            if (current_lot && vehicle.lot_entry_time) {
+                const entryTime = new Date(vehicle.lot_entry_time);
+                const diffSecsTotal = Math.floor((now - entryTime) / 1000);
+                const mins = Math.floor(diffSecsTotal / 60);
+                const secs = diffSecsTotal % 60;
+                const timeStr = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+
+                if (diffSecsTotal < VERIFICATION_TIME) {
+                    legendHtml += `
+                        <div style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                            ${vehicleHeaderHtml}
+                            <span style="color:#f0ad4e; font-weight:bold; font-size: 1.1em;">Verifying: ${current_lot} (${timeStr})</span>
+                        </div>`;
+                } else {
+                    legendHtml += `
+                        <div style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                            ${vehicleHeaderHtml}
+                            <span style="color:#d9534f; font-weight:bold; font-size: 1.1em;">Active: ${current_lot} (${timeStr})</span>
+                        </div>`;
+                }
+            } else {
+                legendHtml += `
+                    <div style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                        ${vehicleHeaderHtml}
+                        <span style="color:#6c757d;"><em>In Transit</em></span>
+                    </div>`;
+            }
+        });
+
+        const legendContent = document.getElementById('legend-content');
+        if (legendContent) legendContent.innerHTML = legendHtml;
+
+
+        Object.keys(drawnPolygons).forEach(lot => {
+            if (currentlyOccupiedLots.has(lot)) {
+                authoritativeLotTimes[lot] = (authoritativeLotTimes[lot] || 0) + 1;
+            }
+            
+            if (authoritativeLotTimes[lot] !== undefined) {
+                const sidebarTimerSpan = document.getElementById(`timer-${lot}`);
+                if (sidebarTimerSpan) {
+                    const totalSecs = authoritativeLotTimes[lot];
+                    const mins = Math.floor(totalSecs / 60);
+                    const secs = totalSecs % 60;
+                    sidebarTimerSpan.innerHTML = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                }
+            }
+        });
+    }
+
+    setInterval(updateLiveTimers, 1000);
+
+    // --- 5. DYNAMIC SIDEBAR LIST ---
+    function updateSidebar() {
+        const gridBox = document.getElementById('lot-grid');
+        const layoffBox = document.getElementById('layoff-container'); // Grab the lay-off container
+        if (!gridBox || Object.keys(drawnPolygons).length === 0) return;
+
+        let lotsToDisplay = Object.keys(drawnPolygons);
+
+        const activeLots = [];
+        const completedLots = [];
+        const partialLots = [];
+        const previousLots = [];
+        const layoffLots = []; // NEW: Array to catch the off-limits lots
+
+        lotsToDisplay.forEach(lot => {
+            // 1. OVERRIDE: Check layoffs FIRST so they get trapped here!
+            if (currentLayoffs && currentLayoffs.has(lot)) {
+                layoffLots.push(lot);
+            } 
+            // 2. Otherwise, sort them normally based on live data
+            else if (currentlyOccupiedLots.has(lot)) {
+                activeLots.push(lot);
+            } else if (lotState.current_shift && lotState.current_shift[lot]) {
+                if (lotState.current_shift[lot].status === 'completed') {
+                    completedLots.push(lot);
+                } else if (lotState.current_shift[lot].status === 'partial') {
+                    partialLots.push(lot);
+                }
+            } else if (lotState.previous_shifts && lotState.previous_shifts[lot]) {
+                previousLots.push(lot);
+            }
+        });
+
+        if (activeLots.length === 0 && completedLots.length === 0 && partialLots.length === 0 && previousLots.length === 0) {
+            gridBox.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #adb5bd; padding: 20px 0;"><em>Awaiting shift activity...</em></div>';
+        }
+
+        const sortLots = (arr) => arr.sort((a, b) => {
+            const numA = parseInt((a.match(/\d+/) || ['999'])[0]);
+            const numB = parseInt((b.match(/\d+/) || ['999'])[0]);
+            if (numA !== numB) return numA - numB;
+            return a.localeCompare(b); 
+        });
+
+        const buildBubble = (lotName, type) => {
+            const shortName = lotName.replace(/^Lot\s+/i, '').replace('_', ' / '); 
+            let bgColor, textColor, borderColor, timeText;
+            let borderStyle = '1px solid'; 
+            let infoIcon = '';
+
+            const fullLot = lotName.startsWith('Lot ') ? lotName : `Lot ${lotName}`;
+            let lotData = (type === 'previous') ? lotState.previous_shifts[fullLot] || lotState.previous_shifts[lotName]
+                                                : lotState.current_shift[fullLot] || lotState.current_shift[lotName];
+
+            if (type === 'active') {
+                bgColor = '#28a745'; textColor = '#ffffff'; borderColor = '#198754'; 
+                timeText = `<span id="timer-${lotName}">00:00</span>`;
+            } else if (type === 'layoff') {
+                bgColor = '#f8d7da'; textColor = '#842029'; borderColor = '#dc3545'; 
+                timeText = 'All Day'; 
+            } else if (type === 'partial') {
+                bgColor = '#ffc107'; textColor = '#000000'; borderColor = '#d39e00'; 
+                const totalSecs = lotData.total_seconds || 0;
+                const mins = Math.floor(totalSecs / 60);
+                const secs = totalSecs % 60;
+                timeText = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            } else if (type === 'completed' || type === 'previous') {
+                const targets = { low: 1, medium: 2, high: 3 };
+                const priority = lotData.priority || 'low';
+                const runs = lotData.daily_runs || 0;
+                const target = targets[priority];
+                
+                let tier = 1;
+                if (runs >= target) tier = 3;                               
+                else if (target === 3 && runs === 2) tier = 2;              
+                
+                if (tier === 1) { bgColor = '#cfe2ff'; textColor = '#084298'; borderColor = '#9ec5fe'; }      
+                else if (tier === 2) { bgColor = '#3d8bfd'; textColor = '#ffffff'; borderColor = '#0d6efd'; } 
+                else if (tier === 3) { bgColor = '#002e5d'; textColor = '#ffffff'; borderColor = '#001a35'; } 
+                
+                if (type === 'previous') borderStyle = '1.5px dashed';
+                timeText = lotData.last_completed ? formatLastCompleted(lotData.last_completed) : '--:--';
+            }
+
+            if (lotData && lotData.entries && lotData.entries.length > 0) {
+                infoIcon = `<div class="info-icon-btn" onclick="showLotInfo(event, '${lotName}', '${type}')">i</div>`;
+            }
+
+            return `
+                <div style="background-color: ${bgColor}; color: ${textColor}; border: ${borderStyle} ${borderColor}; border-radius: 6px; padding: 4px 2px; text-align: center; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative;">
+                    ${infoIcon}
+                    <strong style="font-size: 0.85em; margin-bottom: 0px; line-height: 1.1;">${shortName}</strong>
+                    <span style="font-size: 0.7em; font-weight: 500; opacity: 0.9; line-height: 1.1;">${timeText}</span>
+                </div>`;
+        };
+
+        // --- RENDER MAIN GRID ---
+        let html = '';
+        const addSection = (lots, type, title) => {
+            if (lots.length === 0) return;
+            sortLots(lots);
+            
+            html += `
+                <div style="grid-column: 1 / -1; margin-top: 8px; margin-bottom: 2px; border-bottom: 2px solid #e9ecef; padding-bottom: 2px;">
+                    <span style="font-size: 0.8em; font-weight: bold; color: #002e5d; text-transform: uppercase; letter-spacing: 0.5px;">${title}</span>
+                </div>`;
+                
+            lots.forEach(lot => html += buildBubble(lot, type));
+        };
+
+        addSection(activeLots, 'active', 'In Progress');
+        addSection(partialLots, 'partial', 'Incomplete');
+        addSection(completedLots, 'completed', 'Completed');
+        addSection(previousLots, 'previous', 'Past Shift Completed');
+
+        if (html !== '') gridBox.innerHTML = html;
+
+     // --- RENDER LAYOFF BOX ---
+        const savedLayoffs = JSON.parse(localStorage.getItem('savedLayoffs') || '{}');
+        const layoffKeys = Object.keys(savedLayoffs);
+
+        if (layoffKeys.length > 0) {
+            // Sort lots numerically
+            layoffKeys.sort((a, b) => parseInt(a.replace(/\D/g, '')) - parseInt(b.replace(/\D/g, '')));
+
+            let layoffHtml = `<div style="display: flex; flex-wrap: wrap; gap: 8px; width: 100%;">`;
+            
+            layoffKeys.forEach(lot => {
+                const timeText = savedLayoffs[lot] || 'All Day';
+                const lotNum = lot.replace(/^Lot\s+/i, '').replace('_', ' / '); // preserves 16A, 40S, and makes 10_11 into 10 / 11
+                layoffHtml += `
+                    <div class="layoff-badge" style="
+                        display: inline-flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        min-width: 68px;
+                        padding: 4px 10px;
+                        border-radius: 6px;
+                        background-color: #fee2e2;
+                        border: 1.5px solid #dc2626;
+                        color: #991b1b;
+                        box-sizing: border-box;
+                    ">
+                        <span style="font-size: 1.05rem; font-weight: 800; line-height: 1.1;">${lotNum}</span>
+                        <span style="font-size: 0.75rem; font-weight: 500; margin-top: 1px;">${timeText}</span>
+                    </div>
+                `;
+            });
+            layoffHtml += `</div>`;
+            
+            layoffBox.innerHTML = layoffHtml;
+            // Strip the dashed border away so it looks flush
+            layoffBox.style.border = "none";
+            layoffBox.style.background = "transparent";
+            layoffBox.style.padding = "0";
+            layoffBox.style.display = "block";
+        } else {
+            // Restore the empty dashed placeholder if there are no layoffs
+            layoffBox.innerHTML = '<em style="color: #adb5bd; font-size: 0.85em;">Awaiting lay-off data...</em>';
+            layoffBox.style.border = "1px dashed #ced4da";
+            layoffBox.style.background = "#f8f9fa";
+            layoffBox.style.padding = "10px";
+            layoffBox.style.display = "flex";
+            layoffBox.style.alignItems = "center";
+            layoffBox.style.justifyContent = "center";
+        }
+        
+    }
+    
+
+    // --- COMPLETE LAYOFF CONTROLLER ---
+
+    let pendingLayoffs = {};
+    let activeLotForTimeModal = null;
+
+    function populateTimes() {
+    const start = document.getElementById('startTimeSelect');
+    const end = document.getElementById('endTimeSelect');
+    if (!start || !end) return;
+    start.innerHTML = '';
+    end.innerHTML = '';
+
+    for (let h = 0; h < 24; h++) {
+        for (let m = 0; m < 60; m += 30) {
+        const hh = String(h).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        const t = `${hh}:${mm}`;
+        start.add(new Option(t, t));
+        end.add(new Option(t, t));
+        }
+    }
+    start.value = "07:00";
+    end.value = "17:00";
+    }
+
+    function getStatusColor(lotName) {
+    if (typeof currentlyOccupiedLots !== 'undefined' && (currentlyOccupiedLots.has(lotName) || currentlyOccupiedLots.has(`Lot ${lotName}`))) {
+        return 'pill-status-active';
+    }
+    if (typeof lotState !== 'undefined') {
+        const full = lotName.startsWith('Lot ') ? lotName : `Lot ${lotName}`;
+        if (lotState.current_shift && (lotState.current_shift[full] || lotState.current_shift[lotName])) {
+        const item = lotState.current_shift[full] || lotState.current_shift[lotName];
+        if (item.status === 'completed') return 'pill-status-completed';
+        }
+        if (lotState.previous_shifts && (lotState.previous_shifts[full] || lotState.previous_shifts[lotName])) {
+        return 'pill-status-previous';
+        }
+    }
+    return 'pill-status-pending';
+    }
+
+    function openMainModal() {
+    populateTimes();
+    const saved = JSON.parse(localStorage.getItem('savedLayoffs') || '{}');
+    const hadRecent = localStorage.getItem('hasHadLayoffs') === 'true';
+    pendingLayoffs = { ...saved };
+
+    const header = document.getElementById('layoffModalHeader');
+    if (header) {
+        header.textContent = hadRecent ? 'Recent Layoffs' : 'All Lots';
+    }
+
+    // Comprehensive list of campus lots, or read dynamically from drawnPolygons
+   // Comprehensive list of campus lots, or read dynamically from drawnPolygons
+    // Filter out static icons (B67, CFA, MCD, CANES) so only real traffic lots appear
+    let lots = [];
+    if (typeof drawnPolygons !== 'undefined' && Object.keys(drawnPolygons).length > 0) {
+        lots = Object.keys(drawnPolygons).filter(lotName => {
+            const poly = drawnPolygons[lotName];
+            // Skip icons and explicit food/warehouse keys
+            return poly && !poly.isStaticIcon && !['Lot B67', 'CFA', 'MCD', 'CANES'].includes(lotName);
+        });
+    }
+
+    // Sort numerically
+    lots.sort((a, b) => {
+    const numA = parseInt((a.match(/\d+/) || ['999'])[0], 10);
+    const numB = parseInt((b.match(/\d+/) || ['999'])[0], 10);
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b); // Sorts 16A before 16B cleanly
+}); 
+
+    const grid = document.getElementById('pillGrid');
+    grid.innerHTML = '';
+
+    lots.forEach(rawLot => {
+        // Keep the exact key (stripping only the leading "Lot " if present, but preserving underscores and letters)
+        const lotKey = rawLot.replace(/^Lot\s+/i, '').trim(); 
+        const isSelected = !!pendingLayoffs[lotKey] || !!pendingLayoffs[rawLot];
+
+        const pill = document.createElement('div');
+        pill.className = `pill-btn ${getStatusColor(rawLot)} ${isSelected ? 'pill-layoff-selected' : ''}`;
+        pill.textContent = lotKey; // Displays "10_11", "16A", "40", etc.
+        pill.dataset.lot = lotKey;
+
+        pill.addEventListener('click', () => {
+            if (pendingLayoffs[lotKey] || pendingLayoffs[rawLot]) {
+                // Deselect immediately
+                delete pendingLayoffs[lotKey];
+                delete pendingLayoffs[rawLot];
+                delete pendingLayoffs[`Lot ${lotKey}`];
+                pill.classList.remove('pill-layoff-selected');
+            } else {
+                // Open Time Modal
+                activeLotForTimeModal = lotKey;
+                const allDayCb = document.getElementById('allDayCheckbox');
+                if (allDayCb) allDayCb.checked = true;
+                const timeInputs = document.getElementById('customTimeInputs');
+                if (timeInputs) timeInputs.style.display = 'none';
+                const tModal = document.getElementById('timeModal');
+                if (tModal) tModal.style.display = 'flex';
+            }
+        });
+
+        grid.appendChild(pill);
+    });
+
+    document.getElementById('layoffModal').style.display = 'flex';
+    }
+
+    // Bind Open Button
+    const openBtn = document.getElementById('openLayoffsBtn');
+    if (openBtn) openBtn.onclick = openMainModal;
+
+    // Toggle Time dropdown visibility when checkbox changes
+    const allDayCb = document.getElementById('allDayCheckbox');
+    if (allDayCb) {
+    allDayCb.onchange = function() {
+        document.getElementById('customTimeInputs').style.display = this.checked ? 'none' : 'flex';
+    };
+    }
+
+    // Time Confirm
+    const confirmBtn = document.getElementById('confirmTimeBtn');
+    if (confirmBtn) {
+    confirmBtn.onclick = function() {
+        if (!activeLotForTimeModal) return;
+        const isAllDay = document.getElementById('allDayCheckbox').checked;
+        let timeStr = 'All Day';
+        if (!isAllDay) {
+        const s = document.getElementById('startTimeSelect').value;
+        const e = document.getElementById('endTimeSelect').value;
+        timeStr = `${s} - ${e}`;
+        }
+        pendingLayoffs[activeLotForTimeModal] = timeStr;
+        
+        const pill = document.querySelector(`.pill-btn[data-lot="${activeLotForTimeModal}"]`);
+        if (pill) pill.classList.add('pill-layoff-selected');
+
+        document.getElementById('timeModal').style.display = 'none';
+        activeLotForTimeModal = null;
+    };
+    }
+
+    // Time Cancel
+    const cancelBtn = document.getElementById('cancelTimeBtn');
+    if (cancelBtn) {
+    cancelBtn.onclick = function() {
+        document.getElementById('timeModal').style.display = 'none';
+        activeLotForTimeModal = null;
+    };
+    }
+
+    // Main Modal Close (X)
+    const closeX = document.getElementById('closeLayoffModal');
+    if (closeX) {
+    closeX.onclick = function() {
+        document.getElementById('layoffModal').style.display = 'none';
+    };
+    }
+
+    // Click outside to close (Modal 1)
+    const mainModal = document.getElementById('layoffModal');
+    if (mainModal) {
+    mainModal.onclick = function(e) {
+        if (e.target === mainModal) mainModal.style.display = 'none';
+    };
+    }
+
+    // Click outside to close (Modal 2)
+    const timeModal = document.getElementById('timeModal');
+    if (timeModal) {
+    timeModal.onclick = function(e) {
+        if (e.target === timeModal) {
+        timeModal.style.display = 'none';
+        activeLotForTimeModal = null;
+        }
+    };
+    }
+
+    // Clear All Layoffs Button
+    const clearBtn = document.getElementById('clearAllLayoffsBtn');
+    if (clearBtn) {
+        clearBtn.onclick = function() {
+            // 1. Wipe the in-memory pending selections
+            pendingLayoffs = {};
+
+            // 2. Remove all red styling from pills currently in the modal
+            document.querySelectorAll('#pillGrid .pill-btn').forEach(pill => {
+                pill.classList.remove('pill-layoff-selected');
+            });
+
+            // 3. Clear storage and global Set immediately
+            localStorage.removeItem('savedLayoffs');
+            localStorage.removeItem('hasHadLayoffs');
+            
+            if (typeof currentLayoffs !== 'undefined') {
+                currentLayoffs.clear();
+            }
+
+            // 4. Update header title back to 'All Lots'
+            const header = document.getElementById('layoffModalHeader');
+            if (header) header.textContent = 'All Lots';
+
+            // 5. Instantly refresh the sidebar and polygons
+            updateSidebar();
+            if (typeof updateDashboard === 'function') {
+                updateDashboard();
+            }
+        };
+    }
+    
+    // Done Button: Commit and Refresh Sidebar
+    const doneBtn = document.getElementById('saveLayoffsDoneBtn');
+        if (doneBtn) {
+        doneBtn.onclick = function() {
+            localStorage.setItem('savedLayoffs', JSON.stringify(pendingLayoffs));
+            if (Object.keys(pendingLayoffs).length > 0) {
+            localStorage.setItem('hasHadLayoffs', 'true');
+            }
+
+            if (typeof currentLayoffs !== 'undefined') {
+                currentLayoffs.clear();
+                Object.keys(pendingLayoffs).forEach(k => {
+                    currentLayoffs.add(`Lot ${k}`);
+                    currentLayoffs.add(k);
+                    currentLayoffs.add(k.replace('/', '_')); // Handles 10/11 vs 10_11 polygon keys
+                    currentLayoffs.add(`Lot ${k.replace('/', '_')}`);
+                });
+            }
+
+            document.getElementById('layoffModal').style.display = 'none';
+            if (typeof updateSidebar === 'function') updateSidebar();
+        };
+    };
+
+    // ==========================================
+    // --- MAP OVERLAY CONTROLS CONTROLLER ---
+    // ==========================================
+    
+    const searchInput = document.getElementById('lot-search-input');
+    const searchDropdown = document.getElementById('lot-search-dropdown');
+    const searchBtn = document.getElementById('lot-search-btn');
+
+    if (searchInput && searchDropdown && searchBtn) {
+        // 1. Autocomplete Logic
+        searchInput.addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase().replace(/^lot\s+/i, '').trim();
+            searchDropdown.innerHTML = '';
+            
+            if (!query) {
+                searchDropdown.style.display = 'none';
+                return;
+            }
+
+            // Filter drawnPolygons, skipping static icons (food/warehouses)
+            const matches = Object.keys(drawnPolygons).filter(key => {
+                const poly = drawnPolygons[key];
+                if (poly && poly.isStaticIcon) return false;
+                
+                const rawName = key.toLowerCase();
+                const cleanName = rawName.replace(/^lot\s+/i, '').trim();
+                return cleanName.includes(query) || rawName.includes(query);
+            });
+
+            if (matches.length > 0) {
+                matches.forEach(match => {
+                    const cleanDisplay = match.replace(/^Lot\s+/i, '').replace('_', '/');
+                    const div = document.createElement('div');
+                    div.className = 'search-dropdown-item';
+                    div.textContent = `Lot ${cleanDisplay}`;
+                    
+                    div.onclick = function() {
+                        searchInput.value = match;
+                        searchDropdown.style.display = 'none';
+                        executeSearch(match);
+                    };
+                    searchDropdown.appendChild(div);
+                });
+                searchDropdown.style.display = 'flex';
+            } else {
+                searchDropdown.style.display = 'none';
+            }
+        });
+
+        // 2. Execute Search / Fly-to Function
+        function executeSearch(lotKey) {
+            let targetKey = lotKey;
+            if (!drawnPolygons[targetKey] && drawnPolygons[`Lot ${targetKey}`]) {
+                targetKey = `Lot ${targetKey}`;
+            }
+
+            const poly = drawnPolygons[targetKey];
+            if (poly) {
+                // Disable auto-snapping so the user can actually look at the searched lot
+                cameraLockMode = 'manual'; 
+                trackedVehicleId = null;
+                
+                map.flyToBounds(poly.getBounds(), { padding: [40, 40], animate: true, duration: 1.5 });
+                
+                searchInput.value = '';
+                searchInput.blur();
+            } else {
+                searchInput.style.backgroundColor = '#f8d7da';
+                setTimeout(() => searchInput.style.backgroundColor = '#ffffff', 300);
+            }
+        }
+
+        // 3. Search Triggers (The missing button & key listeners!)
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchDropdown.style.display = 'none';
+                executeSearch(searchInput.value.trim());
+            }
+        });
+
+        searchBtn.addEventListener('click', function() {
+            searchDropdown.style.display = 'none';
+            executeSearch(searchInput.value.trim());
+        });
+
+        // Close dropdown if clicking anywhere else on the page
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.search-container')) {
+                searchDropdown.style.display = 'none';
+            }
+        });
+    }
+
+    // ==========================================
+    // --- CAMERA & VEHICLE TRACKING BUTTONS ---
+    // ==========================================
+
+    // Global Vehicle Tracking (Fired by the crosshair buttons in the legend)
+    window.focusVehicle = function(vId) {
+        if (trackedVehicleId === vId) {
+            // If already tracking this car, clicking it again turns tracking off
+            cameraLockMode = 'auto';
+            trackedVehicleId = null;
+            currentCameraState = 'unknown'; // Force immediate bounds recalculation
+            updateDashboard();
+        } else {
+            // Lock onto new vehicle
+            cameraLockMode = 'vehicle';
+            trackedVehicleId = vId;
+            const vData = latestVehicleData.find(v => v.vehicle_id === vId);
+            if (vData && vData.latitude && vData.longitude) {
+                // Fly to the car, but respect whatever zoom level the user is currently at
+                map.flyTo([vData.latitude, vData.longitude], map.getZoom(), { animate: true, duration: 1 });
+            }
+        }
+    };
+
+    // Auto-Campus Focus Button (Restores normal auto-zooming)
+    const camAutoBtn = document.getElementById('cam-auto-btn');
+    if (camAutoBtn) {
+        camAutoBtn.addEventListener('click', function() {
+            cameraLockMode = 'auto';
+            trackedVehicleId = null;
+            currentCameraState = 'unknown'; // Force immediate bounds recalculation
+            updateDashboard();
+        });
+    }
+
+    // Whole Lot View Button (Locks in Extended mode manually)
+    const camExtBtn = document.getElementById('cam-extended-btn');
+    if (camExtBtn) {
+        camExtBtn.addEventListener('click', function() {
+            cameraLockMode = 'manual';
+            trackedVehicleId = null;
+            map.flyToBounds(extendedBounds, { padding: [0, 0], animate: true, duration: 1.5 });
+        });
+    }
+    // Zoom In Button
+    const camZoomInBtn = document.getElementById('cam-zoom-in-btn');
+    if (camZoomInBtn) {
+        camZoomInBtn.addEventListener('click', function() {
+            if (cameraLockMode !== 'vehicle') {
+                cameraLockMode = 'manual'; // Stop auto-snapping only if not tracking
+                trackedVehicleId = null;
+            }
+            map.zoomIn();
+        });
+    }
+
+    // Zoom Out Button
+    const camZoomOutBtn = document.getElementById('cam-zoom-out-btn');
+    if (camZoomOutBtn) {
+        camZoomOutBtn.addEventListener('click', function() {
+            if (cameraLockMode !== 'vehicle') {
+                cameraLockMode = 'manual'; // Stop auto-snapping only if not tracking
+                trackedVehicleId = null;
+            }
+            map.zoomOut();
+        });
+    }
+
+});
+</script>
+
+<!-- Global Lot History Popover -->
+<div id="global-lot-popover" class="lot-popover" style="display: none;">
+    <div class="lot-popover-header" id="popover-title">Lot History</div>
+    <div id="popover-entries"></div>
+    <div class="lot-popover-ghost">Click outside to close</div>
+</div>
+
+</body>
+</html>
