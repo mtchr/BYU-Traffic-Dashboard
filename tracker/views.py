@@ -291,39 +291,100 @@ def api_vehicle_summary(request):
 
 @csrf_exempt
 def ingest_gps(request):
-    """Receives JSON data from the Raspberry Pi and saves it."""
-    
+    """Receives JSON data from the Raspberry Pi, runs geofencing/timers, and saves it."""
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
             
             vehicle_id = data.get('vehicle_id')
-            lat = data.get('latitude')
-            lng = data.get('longitude')
+            # Supports both 'latitude'/'longitude' (Pi) and 'lat'/'lon' (Simulator)
+            lat = float(data.get('latitude') if 'latitude' in data else data.get('lat'))
+            lng = float(data.get('longitude') if 'longitude' in data else data.get('lon'))
             
-            # 1. Update the vehicle's current live position
-            vehicle, created = Vehicle.objects.get_or_create(
+            # 1. Translate string from geofence into the actual Lot database object
+            calculated_lot_name = get_lot(lat, lng)
+            calculated_lot = Lot.objects.filter(name=calculated_lot_name).first() if calculated_lot_name else None
+            
+            thresholds = getattr(lot_polygons, 'COMPLETION_THRESHOLDS', {"default": 30})
+            verification_time = getattr(lot_polygons, 'VERIFICATION_TIME', 15)
+            shift_name, shift_date, shift_start_time = get_current_shift_info()
+            current_time = timezone.now()
+            
+            # 2. Get or create the vehicle
+            vehicle_obj, created = Vehicle.objects.get_or_create(
                 vehicle_id=vehicle_id,
                 defaults={'last_lat': lat, 'last_lon': lng}
             )
             
-            # Update coordinates and execute the Shapely geofencing check
-            vehicle.last_lat = lat
-            vehicle.last_lon = lng
-            vehicle.lot = get_lot(lat, lng)
-            vehicle.save()
+            entry_time = vehicle_obj.lot_entry_time
+            last_visited = vehicle_obj.last_visited_lot
+            drift_start = vehicle_obj.drift_start_time
             
-            # 2. Save the historical breadcrumb for the replay map
-            # We use vehicle=vehicle here because VehicleLog expects the actual ForeignKey object
+            # --- DRIFT PROTECTION & TIMER LOGIC ---
+            if vehicle_obj.current_lot:
+                if calculated_lot == vehicle_obj.current_lot:
+                    drift_start = None
+                    if not entry_time:
+                        entry_time = current_time
+                else:
+                    if not drift_start:
+                        drift_start = current_time
+                        calculated_lot = vehicle_obj.current_lot 
+                    else:
+                        drift_duration = (current_time - drift_start).total_seconds()
+                        if drift_duration >= 15:
+                            actual_exit_time = drift_start
+                            duration = (actual_exit_time - (vehicle_obj.lot_entry_time or actual_exit_time)).total_seconds()
+                            
+                            lot_name_key = vehicle_obj.current_lot.name if vehicle_obj.current_lot else "default"
+                            req_time = thresholds.get(lot_name_key, thresholds.get("default", 30))
+                            
+                            if duration >= req_time or duration >= verification_time:
+                                status = 'completed' if duration >= req_time else 'partial'
+                                PatrolEntry.objects.create(
+                                    lot=vehicle_obj.current_lot, 
+                                    vehicle=vehicle_obj,
+                                    enter_time=vehicle_obj.lot_entry_time or actual_exit_time,
+                                    exit_time=actual_exit_time,
+                                    duration_seconds=int(duration), 
+                                    shift_name=shift_name,
+                                    shift_date=shift_date, 
+                                    status=status
+                                )
+                            
+                            last_visited = vehicle_obj.current_lot
+                            drift_start = None
+                            entry_time = current_time if calculated_lot else None
+                        else:
+                            calculated_lot = vehicle_obj.current_lot
+            else:
+                if calculated_lot:
+                    entry_time = current_time
+                    drift_start = None
+                    
+            # 3. Update Vehicle State
+            vehicle_obj.last_lat = lat
+            vehicle_obj.last_lon = lng
+            vehicle_obj.current_lot = calculated_lot
+            vehicle_obj.lot_entry_time = entry_time
+            vehicle_obj.last_visited_lot = last_visited
+            vehicle_obj.drift_start_time = drift_start
+            vehicle_obj.save()
+
+            # 4. Log raw breadcrumb
             VehicleLog.objects.create(
-                vehicle=vehicle,
-                latitude=lat,
-                longitude=lng
+                vehicle=vehicle_obj, 
+                latitude=lat, 
+                longitude=lng, 
+                lot_name=calculated_lot_name
             )
+            VehicleLog.objects.filter(timestamp__lt=shift_start_time).delete()
             
             return JsonResponse({'status': 'success', 'message': 'Location logged'}, status=200)
             
-        except json.JSONDecodeError:
-            return JsonResponse({'status': 'error', 'message': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
             
     return JsonResponse({'status': 'error', 'message': 'Only POST requests allowed'}, status=405)
