@@ -176,7 +176,7 @@ def api_completed_patrols(request):
         lot_name = entry.lot.name
         
         if entry.status == 'completed':
-            daily_run_counts[lot_name] += 1
+            daily_run_counts[lot_name] = daily_run_counts.get(lot_name, 0) + 1
 
         # Format exact times for the (i) modal
         def format_time(dt):
@@ -225,7 +225,7 @@ def api_completed_patrols(request):
             "status": current_status.get(lot_name, 'partial'),
             "time": f"{mins:02d}:{secs:02d}",
             "total_seconds": int(total_secs),
-            "daily_runs": daily_run_counts[lot_name],
+            "daily_runs": daily_run_counts.get(lot_name, 0),
             "priority": all_lots.get(lot_name, 'low'),
             "entries": lot_entries_history.get(lot_name, []),
             "last_completed": latest_exit_times[lot_name].isoformat() if lot_name in latest_exit_times else None
