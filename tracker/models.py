@@ -84,5 +84,11 @@ class Layoff(models.Model):
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
 
+    class Meta:
+        permissions = [
+            ("manage_layoffs", "Can manage layoffs"),
+        ]
+
     def __str__(self):
         return f"Layoff for {self.lot.name} on {self.active_date}"
+
