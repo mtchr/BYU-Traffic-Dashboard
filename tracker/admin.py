@@ -25,8 +25,34 @@ class PatrolEntryAdmin(admin.ModelAdmin):
 
 @admin.register(Layoff)
 class LayoffAdmin(admin.ModelAdmin):
-    list_display = ('lot', 'active_date', 'all_day', 'start_time', 'end_time')
-    list_filter = ('active_date', 'all_day')
+    list_display = (
+        'lot', 'starts_at', 'ends_at', 'all_day',
+        'created_by', 'cancelled_at',
+    )
+    list_filter = ('all_day', 'starts_at')
+    date_hierarchy = 'starts_at'
+    search_fields = ('lot__name',)
+    list_select_related = (
+        'lot', 'created_by', 'cancelled_by', 'replaces',
+    )
+    readonly_fields = tuple(
+        field.name for field in Layoff._meta.fields
+    )
+
+    def has_view_permission(self, request, obj=None):
+        return (
+            request.user.has_perm('tracker.manage_layoffs')
+            or super().has_view_permission(request, obj)
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 @admin.register(LotEvent)
 class LotEventAdmin(admin.ModelAdmin):

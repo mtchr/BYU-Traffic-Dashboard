@@ -1,0 +1,1 @@
+"""Shared layoff operations and JSON endpoints."""
